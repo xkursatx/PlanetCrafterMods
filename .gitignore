@@ -363,5 +363,5 @@ MigrationBackup/
 FodyWeavers.xsd
 /solution_private.targets
 
-AutoCrafterTweaks/
-AutoMine/
+OtherMods/
+/AutoCollector/Custom-1.json

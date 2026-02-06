@@ -6,6 +6,10 @@
   <Import Project="$(SolutionDir)\solution_private.targets" />
   <Import Project="$(SolutionDir)\solution.targets" />
   <ItemGroup>
+    <None Remove="Custom-1.json" />
+    <None Remove="items.log" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="..\ModUtils\ModUtils.cs" Link="ModUtils.cs" />
   </ItemGroup>
 </Project>
