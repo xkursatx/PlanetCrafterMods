@@ -5,6 +5,7 @@ using HarmonyLib;
 using SpaceCraft;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -19,6 +20,8 @@ namespace ContainerFinder
         public static ConfigEntry<string> scanKey;
         public static ConfigEntry<float> maxDistance;
         public static ConfigEntry<bool> showGoldenOnly;
+        public static ConfigEntry<bool> showEmpty;
+        public static ConfigEntry<bool> showPlayer;
 
         private List<ContainerInfo> foundContainers = new List<ContainerInfo>();
         private float displayTimer = 0f;
@@ -42,6 +45,8 @@ namespace ContainerFinder
             scanKey = Config.Bind<string>("Hotkeys", "ScanKey", "<Keyboard>/g", "Key to scan for containers");
             maxDistance = Config.Bind<float>("Options", "MaxDistance", 5000f, "Maximum scan distance (meters)");
             showGoldenOnly = Config.Bind<bool>("Options", "ShowGoldenOnly", false, "Show only Golden Containers");
+            showEmpty = Config.Bind<bool>("Options", "ShowEmpty", false, "Show empty containers");
+            showPlayer = Config.Bind<bool>("Options", "ShowPlayer", true, "Show player-created containers");
 
             Logger.LogInfo("=".PadRight(80, '='));
             Logger.LogInfo("ContainerFinder v1.0.0 Loaded!");
@@ -49,8 +54,10 @@ namespace ContainerFinder
             Logger.LogInfo($"MaxDistance: {maxDistance.Value}m");
             Logger.LogInfo($"ShowGoldenOnly: {showGoldenOnly.Value}");
             Logger.LogInfo($"ModEnabled: {modEnabled.Value}");
+            Logger.LogInfo($"ShowEmpty: {showEmpty.Value}");
+            Logger.LogInfo($"ShowPlayer: {showPlayer.Value}");
             Logger.LogInfo("=".PadRight(80, '='));
-            
+
             // Apply Harmony patches - use Assembly not typeof!
             try
             {
@@ -128,44 +135,64 @@ namespace ContainerFinder
 
             Logger.LogInfo($"Player position: {player}");
 
-            var allWorldObjects = FindObjectsOfType<WorldObjectAssociated>();
+            //Updated to this per Unity 2023.1 changes, using FindObjectsByType instead of FindObjectsOfType
+            var allWorldObjects = FindObjectsByType<WorldObjectAssociated>(FindObjectsSortMode.None);
+
             Logger.LogInfo($"Scanning {allWorldObjects.Length} objects...");
-            
+
             int containerCount = 0;
-            
+
             foreach (var woa in allWorldObjects)
             {
                 if (woa == null)
                     continue;
-                    
+
                 var worldObject = woa.GetWorldObject();
                 if (worldObject == null || worldObject.GetGroup() == null)
                     continue;
 
-                string groupId = worldObject.GetGroup().GetId();
+                string groupId = worldObject.GetGroup().GetId();                
 
-                if (IsContainer(groupId))
+                if (!IsContainer(groupId))
+                    continue;
+
+                containerCount++;
+
+                bool isGolden = groupId.Contains("Golden");
+                if (showGoldenOnly.Value && !isGolden)
+                    continue;
+
+                Vector3 position = woa.transform.position;
+                float distance = Vector3.Distance(player, position);
+
+                //NEW: Check if the container is empty and skip it if showEmpty is false
+                if (!showEmpty.Value)
                 {
-                    containerCount++;
-                    
-                    bool isGolden = groupId.Contains("Golden");
-                    if (showGoldenOnly.Value && !isGolden)
+                    if (IsEmpty(woa, worldObject, distance, groupId))
                         continue;
+                }
 
-                    Vector3 position = woa.transform.position;
-                    float distance = Vector3.Distance(player, position);
+                //NEW: Check if the container is player-created and skip it if showPlayer is false
+                if (!showPlayer.Value)
+                {
+                    var inventoryId = worldObject.GetLinkedInventoryId();
+                    //Procedural have the same kind of inventory as player-created containers,
+                    //but they should still be shown if they have stuff in them. This is why we 
+                    //include !IsProcedural here.
+                    if (inventoryId > 0 && !IsProcedural(groupId))
+                        continue;
+                }
 
-                    if (distance <= maxDistance.Value)
+                if (distance <= maxDistance.Value)
+                {
+                    foundContainers.Add(new ContainerInfo
                     {
-                        foundContainers.Add(new ContainerInfo
-                        {
-                            groupId = groupId,
-                            position = position,
-                            distance = distance,
-                            isGolden = isGolden,
-                            direction = GetDirectionArrow(player, position)
-                        });
-                    }
+                        groupId = groupId,
+                        position = position,
+                        distance = distance,
+                        isGolden = isGolden,
+                        direction = GetDirectionArrow(player, position)
+                    });
                 }
             }
 
@@ -173,7 +200,7 @@ namespace ContainerFinder
 
             Logger.LogInfo($"=== SCAN COMPLETE ===");
             Logger.LogInfo($"Found {foundContainers.Count} containers within {maxDistance.Value}m (Total containers: {containerCount})");
-            
+
             if (foundContainers.Count > 0)
             {
                 Logger.LogInfo($"Closest 5:");
@@ -195,7 +222,8 @@ namespace ContainerFinder
                    groupId == "canister" ||
                    groupId.Contains("ContainerAqualis") ||
                    groupId.Contains("ContainerToxic") ||
-                   groupId.Contains("StarformContainer");
+                   groupId.Contains("StarformContainer") ||
+                   IsProcedural(groupId);
         }
 
         private Vector3 GetPlayerPosition()
@@ -230,15 +258,15 @@ namespace ContainerFinder
         {
             var playersManager = Managers.GetManager<PlayersManager>();
             var player = playersManager?.GetActivePlayerController();
-            
+
             if (player == null)
                 return "?";
-            
+
             Vector3 directionToTarget = (targetPos - playerPos).normalized;
             Vector3 playerForward = player.transform.forward;
             float angle = Vector3.SignedAngle(playerForward, directionToTarget, Vector3.up);
             float verticalDiff = targetPos.y - playerPos.y;
-            
+
             string arrow;
             if (angle >= -22.5f && angle < 22.5f)
                 arrow = "⬆️";
@@ -256,12 +284,12 @@ namespace ContainerFinder
                 arrow = "⬅️";
             else
                 arrow = "↖️";
-            
+
             if (verticalDiff > 5f)
                 arrow += "⬆";
             else if (verticalDiff < -5f)
                 arrow += "⬇";
-            
+
             return arrow;
         }
 
@@ -309,7 +337,7 @@ namespace ContainerFinder
 
             string text = $"<b>=== CONTAINERS ({foundContainers.Count}) ===</b>\n";
             text += $"<color=yellow>{displayTimer:F0}s</color> | <color=cyan>G=Refresh</color>\n\n";
-            
+
             foreach (var container in foundContainers.Take(10))
             {
                 if (container.isGolden)
@@ -323,7 +351,7 @@ namespace ContainerFinder
                     text += $"<color=white>{container.distance:F0}m</color>\n";
                 }
             }
-            
+
             if (foundContainers.Count > 10)
             {
                 text += $"\n<color=gray>+{foundContainers.Count - 10} more</color>";
@@ -338,7 +366,7 @@ namespace ContainerFinder
         {
             var playersManager = Managers.GetManager<PlayersManager>();
             var player = playersManager?.GetActivePlayerController();
-            
+
             if (player == null)
                 return;
 
@@ -442,6 +470,102 @@ namespace ContainerFinder
             public float distance;
             public bool isGolden;
             public string direction; // NEW: Direction indicator
+        }
+
+        private bool IsEmpty(WorldObjectAssociated woa, WorldObject worldObject, float distance, string groupId)
+        {
+            if (worldObject == null)
+                return true;
+
+            //First, we check whether it has a linked inventory. Having one means it is likely not a world container, but a player-created one.
+            //If it doesn't have one, it is likely a world container. We have to check each one in a different way, because of how world containers work.
+            var name = worldObject.GetGameObject().name;
+            var inventoryId = worldObject.GetLinkedInventoryId();
+
+            // If it has a linked inventory, check if that inventory is empty
+            if (inventoryId > 0)
+            {
+                // Check if inventory is empty
+                var inventory = InventoriesHandler.Instance.GetInventoryById(inventoryId);
+                return inventory == null || inventory.IsEmpty();
+            }
+            else // If it doesn't have a linked inventory, check if it has an associated inventory component and whether that is empty
+            {
+                var gameObject = worldObject.GetGameObject();
+                var associatedInventory = gameObject.GetComponent<InventoryAssociated>();
+                if (associatedInventory != null)
+                {
+                    var isEmpty = true;
+
+                    associatedInventory.GetInventory(i => isEmpty = i.IsEmpty());
+
+                    return isEmpty;
+                }
+                else                                    
+                    return true;
+            }
+        }
+
+        private bool IsProcedural(string groupId)
+        {
+            return groupId.Contains("ProceduralWreckContainer");
+        }
+
+        /// <summary>
+        /// Debug method I used to log all components of a container, and whether it has an 
+        /// InventoryFromScene or InventoryAssociated component, and their properties.
+        /// Left for future authors to use if they are digging into a new container type.
+        /// </summary>
+        /// <param name="worldObject"></param>
+        /// <param name="distance"></param>
+        private void LogContainer(WorldObject worldObject, float distance)
+        {
+            if (worldObject == null)
+                return;
+            var name = worldObject.GetGameObject().name;
+            var inventoryId = worldObject.GetLinkedInventoryId();
+
+            Logger.LogInfo($"----STARTING LOG FOR CONTAINER id: {worldObject.GetGroup().GetId()} | name: {name} | location: {worldObject.GetGameObject().transform.position} | distance: {distance:F1}m | inventoryId: {inventoryId} ----------");
+
+            var gameObject = worldObject.GetGameObject();
+
+            if (gameObject != null)
+            {
+                Logger.LogInfo($"--- Component Scan for {gameObject.name} ---");
+
+                var components = gameObject.GetComponents<Component>();
+                foreach (var component in components)
+                {
+                    Logger.LogInfo($"---- Component: {component.GetType().FullName}");
+                }
+
+                var inventoryFromScene = gameObject.GetComponent<InventoryFromScene>();
+
+                if (inventoryFromScene != null)
+                {
+                    Logger.LogInfo($"---- InventoryFromScene found. tag: {inventoryFromScene.tag} | name: {inventoryFromScene.name} | InstanceId: {inventoryFromScene.GetInstanceID()} | isActiveAndEnabled: {inventoryFromScene.isActiveAndEnabled} | didStart: {inventoryFromScene.didStart}");
+                }
+                else
+                {
+                    Logger.LogInfo($"---- InventoryFromScene NOT found on {gameObject.name}");
+                }
+
+                var associatedInventory = gameObject.GetComponent<InventoryAssociated>();
+                if (associatedInventory != null)
+                {
+                    var isEmpty = true;
+
+                    associatedInventory.GetInventory(i => isEmpty = i.IsEmpty());
+
+                    Logger.LogInfo($"---- InventoryAssociated found. tag: {associatedInventory.tag} | name: {associatedInventory.name} | InstanceId: {associatedInventory.GetInstanceID()} | isActiveAndEnabled: {associatedInventory.isActiveAndEnabled} | didStart: {associatedInventory.didStart} | InventoryId: {associatedInventory.GetInventoryId()} | isEmpty: {isEmpty}");
+                }
+                else
+                {
+                    Logger.LogInfo($"---- InventoryAssociated NOT found on {gameObject.name}");
+                }
+            }
+
+            Logger.LogInfo($"----ENDING LOG FOR CONTAINER id: {worldObject.GetGroup().GetId()} | name: {name} | location: {worldObject.GetGameObject().transform.position} | distance: {distance:F1}m | inventoryId: {inventoryId} ----------");
         }
     }
 }
