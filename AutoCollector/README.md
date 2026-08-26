@@ -1,4 +1,14 @@
-﻿# Auto Collector Container v3.0.0
+﻿This mod is free and will always remain free.
+
+If you enjoy using it and would like to support future updates or new mods,
+you can buy me a coffee ☕
+https://www.buymeacoffee.com/xkursat
+
+Thank you for your support and feedback!
+
+
+
+# Auto Collector Container v3.0.0
 
 A BepInEx mod for **The Planet Crafter** that adds intelligent automation to containers.
 

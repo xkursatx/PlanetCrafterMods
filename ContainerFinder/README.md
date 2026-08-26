@@ -1,3 +1,13 @@
+﻿This mod is free and will always remain free.
+
+If you enjoy using it and would like to support future updates or new mods,
+you can buy me a coffee ☕
+https://www.buymeacoffee.com/xkursat
+
+Thank you for your support and feedback!
+
+
+
 # Container Finder
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/xkursatx/PlanetCrafterMods)
@@ -22,6 +32,8 @@ Press **G** to scan and see all containers marked with floating 3D labels in the
 - **Color Coded** - Cyan for normal, yellow for golden containers
 - **On-Screen List** - Compact distance-sorted list in corner
 - **Configurable** - Adjust scan radius and hotkey
+- **Empty Container Filter** - Option to hide/show empty containers (configurable)
+- **UI Scale & Notifications** - On-screen UI scale and scan completion notification available in config
 
 ## Installation
 
@@ -31,10 +43,10 @@ Press **G** to scan and see all containers marked with floating 3D labels in the
 
 ## Usage
 
-1. Press **G** to scan for containers
+1. Press the configured scan key (default **G**) to scan for containers
 2. See 3D markers on all containers within range
 3. Markers show container type and distance
-4. Display lasts 30 seconds, press G to refresh
+Display lasts configurable seconds (default 30), press configured key to refresh
 
 **Status Indicators:**
 - ?? Green: Ready to scan
@@ -79,10 +91,12 @@ ShowGoldenOnly = false       # Filter to golden containers only
 Created by [xkursat](https://github.com/xkursatx)  
 Based on [aedenthorn's template](https://github.com/aedenthorn/PlanetCrafterMods)
 
+Special thanks to [ScuffleKerfuffle](https://github.com/ScuffleKerfuffle) for contribution and help implementing EmptyContainers support.
+
 ## License
 
 MIT License - Free for personal use
 
 ---
 
-[Report Issues](https://github.com/xkursatx/PlanetCrafterMods/issues) � [View Source](https://github.com/xkursatx/PlanetCrafterMods)
+[Report Issues](https://github.com/xkursatx/PlanetCrafterMods/issues) • [View Source](https://github.com/xkursatx/PlanetCrafterMods)

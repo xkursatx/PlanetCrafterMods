@@ -5,6 +5,7 @@ using HarmonyLib;
 using SpaceCraft;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
@@ -153,10 +154,32 @@ namespace AutoCollector
         {
             if (containerWorldObjectId >= 0)
             {
-                PlayerPrefs.SetInt($"AC_{containerWorldObjectId}_Collect", autoCollectEnabled ? 1 : 0);
-                PlayerPrefs.SetInt($"AC_{containerWorldObjectId}_Forward", autoForwardEnabled ? 1 : 0);
-                PlayerPrefs.SetInt($"AC_{containerWorldObjectId}_Target", targetContainerId);
-                PlayerPrefs.Save();
+                try
+                {
+                    // Save to JSON file in BepInEx config folder
+                    string configPath = System.IO.Path.Combine(Paths.ConfigPath, "AutoCollector");
+                    if (!System.IO.Directory.Exists(configPath))
+                        System.IO.Directory.CreateDirectory(configPath);
+                    
+                    string filePath = System.IO.Path.Combine(configPath, $"container_{containerWorldObjectId}.json");
+                    
+                    var saveData = new ContainerSaveData
+                    {
+                        containerId = containerWorldObjectId,
+                        autoCollectEnabled = autoCollectEnabled,
+                        autoForwardEnabled = autoForwardEnabled,
+                        targetContainerId = targetContainerId
+                    };
+                    
+                    string json = JsonUtility.ToJson(saveData, true);
+                    System.IO.File.WriteAllText(filePath, json);
+                    
+                    BepInExPlugin.Dbgl($"State saved to {filePath}");
+                }
+                catch (Exception ex)
+                {
+                    BepInExPlugin.Dbgl($"SaveState error: {ex.Message}", LogLevel.Error);
+                }
             }
         }
 
@@ -164,9 +187,31 @@ namespace AutoCollector
         {
             if (containerWorldObjectId >= 0)
             {
-                autoCollectEnabled = PlayerPrefs.GetInt($"AC_{containerWorldObjectId}_Collect", 0) == 1;
-                autoForwardEnabled = PlayerPrefs.GetInt($"AC_{containerWorldObjectId}_Forward", 0) == 1;
-                targetContainerId = PlayerPrefs.GetInt($"AC_{containerWorldObjectId}_Target", -1);
+                try
+                {
+                    string configPath = System.IO.Path.Combine(Paths.ConfigPath, "AutoCollector");
+                    string filePath = System.IO.Path.Combine(configPath, $"container_{containerWorldObjectId}.json");
+                    
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        string json = System.IO.File.ReadAllText(filePath);
+                        var saveData = JsonUtility.FromJson<ContainerSaveData>(json);
+                        
+                        autoCollectEnabled = saveData.autoCollectEnabled;
+                        autoForwardEnabled = saveData.autoForwardEnabled;
+                        targetContainerId = saveData.targetContainerId;
+                        
+                        BepInExPlugin.Dbgl($"State loaded from {filePath}");
+                    }
+                    else
+                    {
+                        BepInExPlugin.Dbgl($"No save file found for container {containerWorldObjectId}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    BepInExPlugin.Dbgl($"LoadState error: {ex.Message}", LogLevel.Error);
+                }
             }
         }
 
@@ -453,6 +498,15 @@ namespace AutoCollector
         }
     }
 
+    [Serializable]
+    public class ContainerSaveData
+    {
+        public int containerId;
+        public bool autoCollectEnabled;
+        public bool autoForwardEnabled;
+        public int targetContainerId;
+    }
+
     public class ContainerInfo
     {
         public int id;
@@ -700,7 +754,7 @@ namespace AutoCollector
             valueTextRect.sizeDelta = Vector2.zero;
 
             Text valueText = valueTextObj.AddComponent<Text>();
-            valueText.text = maxPerItem == 0 ? "?" : maxPerItem.ToString();
+            valueText.text = maxPerItem == 0 ? "0" : maxPerItem.ToString();
             valueText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             valueText.fontSize = 16;
             valueText.color = Color.yellow;

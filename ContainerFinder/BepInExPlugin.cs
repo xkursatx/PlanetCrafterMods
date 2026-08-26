@@ -15,8 +15,10 @@ namespace ContainerFinder
     public class BepInExPlugin : BaseUnityPlugin
     {
         public static BepInExPlugin context;
+
         public static ConfigEntry<bool> modEnabled;
         public static ConfigEntry<bool> isDebug;
+        public static ConfigEntry<float> uiScalePercent;
         public static ConfigEntry<string> scanKey;
         public static ConfigEntry<float> maxDistance;
         public static ConfigEntry<bool> showGoldenOnly;
@@ -28,6 +30,8 @@ namespace ContainerFinder
         private const float DISPLAY_DURATION = 30f;
         private bool isScanning = false;
         private bool show3DMarkers = true; // NEW: Toggle for 3D markers
+        private string scanNotification = "";
+        private float scanNotificationTimer = 0f;
 
         private static InputAction scanAction;
 
@@ -37,11 +41,38 @@ namespace ContainerFinder
                 context.Logger.Log(logLevel, str);
         }
 
+        private static string GetScanKeyDisplayName()
+        {
+            try
+            {
+                var binding = scanKey?.Value ?? "<Keyboard>/g";
+                // If binding contains '/', take last segment
+                if (binding.Contains('/'))
+                    binding = binding.Substring(binding.LastIndexOf('/') + 1);
+                // Remove angle brackets and any non-alphanumeric characters
+                binding = binding.Replace("<", "").Replace(">", "");
+                // Some bindings include device name like Keyboard
+                if (binding.Contains("Keyboard"))
+                {
+                    var parts = binding.Split('/');
+                    binding = parts.Last();
+                }
+                // Uppercase for display
+                binding = binding.ToUpperInvariant();
+                return binding;
+            }
+            catch
+            {
+                return "G";
+            }
+        }
+
         private void Awake()
         {
             context = this;
             modEnabled = Config.Bind<bool>("General", "Enabled", true, "Enable this mod");
             isDebug = Config.Bind<bool>("General", "IsDebug", true, "Enable debug logs");
+            uiScalePercent = Config.Bind<float>("General", "UiScalePercent", 100f, "UI scale percent for On-Screen displays (e.g. 100 = normal, 150 = 1.5x)");
             scanKey = Config.Bind<string>("Hotkeys", "ScanKey", "<Keyboard>/g", "Key to scan for containers");
             maxDistance = Config.Bind<float>("Options", "MaxDistance", 5000f, "Maximum scan distance (meters)");
             showGoldenOnly = Config.Bind<bool>("Options", "ShowGoldenOnly", false, "Show only Golden Containers");
@@ -50,7 +81,7 @@ namespace ContainerFinder
 
             Logger.LogInfo("=".PadRight(80, '='));
             Logger.LogInfo("ContainerFinder v1.0.0 Loaded!");
-            Logger.LogInfo($"Press G key to scan for containers.");
+            Logger.LogInfo($"Press {GetScanKeyDisplayName()} key to scan for containers.");
             Logger.LogInfo($"MaxDistance: {maxDistance.Value}m");
             Logger.LogInfo($"ShowGoldenOnly: {showGoldenOnly.Value}");
             Logger.LogInfo($"ModEnabled: {modEnabled.Value}");
@@ -213,6 +244,19 @@ namespace ContainerFinder
 
             displayTimer = DISPLAY_DURATION;
             isScanning = false;
+
+            // Notify player with HUD message and optional sound
+            if (foundContainers != null)
+            {
+                if (foundContainers.Count > 0)
+                    scanNotification = $"Scan complete: {foundContainers.Count} containers found";
+                else
+                    scanNotification = "Scan complete: No containers found";
+
+                scanNotificationTimer = 5f;
+
+                // (scan sound removed to avoid Unity audio assembly reference issues)
+            }
         }
 
         private bool IsContainer(string groupId)
@@ -295,9 +339,19 @@ namespace ContainerFinder
 
         private void OnGUI()
         {
+            // Don't draw UI on main menu / when no active player exists
+            var playersManagerForGui = Managers.GetManager<PlayersManager>();
+            var activePlayerForGui = playersManagerForGui?.GetActivePlayerController();
+            if (playersManagerForGui == null || activePlayerForGui == null)
+                return;
+
+            // UI scale multiplier from config
+            float uiScale = 1f;
+            try { uiScale = Mathf.Clamp(uiScalePercent.Value / 100f, 0.5f, 3f); } catch { uiScale = 1f; }
+
             // Status indicator at bottom left - ALWAYS VISIBLE
             GUIStyle statusStyle = new GUIStyle(GUI.skin.label);
-            statusStyle.fontSize = 18;
+            statusStyle.fontSize = Mathf.RoundToInt(18 * uiScale);
             statusStyle.fontStyle = FontStyle.Bold;
 
             string statusText;
@@ -309,14 +363,14 @@ namespace ContainerFinder
             else
             {
                 statusStyle.normal.textColor = Color.green;
-                statusText = "ContainerFinder Active - Press G to scan";
+                statusText = $"ContainerFinder Active - Press {GetScanKeyDisplayName()} to scan";
             }
 
             // Draw with background box
             GUI.backgroundColor = new Color(0, 0, 0, 0.7f);
-            GUI.Box(new Rect(5, Screen.height - 40, 600, 35), "");
+            GUI.Box(new Rect(5 * uiScale, Screen.height - 40 * uiScale, 600 * uiScale, 35 * uiScale), "");
             GUI.backgroundColor = Color.white;
-            GUI.Label(new Rect(10, Screen.height - 35, 590, 30), statusText, statusStyle);
+            GUI.Label(new Rect(10 * uiScale, Screen.height - 35 * uiScale, 590 * uiScale, 30 * uiScale), statusText, statusStyle);
 
             // Draw 3D world markers
             if (show3DMarkers && displayTimer > 0 && foundContainers.Count > 0)
@@ -324,19 +378,35 @@ namespace ContainerFinder
                 DrawWorldMarkers();
             }
 
+            // Update and show HUD scan notification (top-center)
+            if (scanNotificationTimer > 0f)
+            {
+                scanNotificationTimer -= Time.deltaTime;
+                GUIStyle notifStyle = new GUIStyle(GUI.skin.box);
+                notifStyle.fontSize = Mathf.RoundToInt(20 * uiScale);
+                notifStyle.alignment = TextAnchor.MiddleCenter;
+                notifStyle.normal.textColor = Color.cyan;
+                GUI.backgroundColor = new Color(0, 0, 0, 0.8f);
+                float w = 600f * uiScale;
+                float h = 50f * uiScale;
+                GUI.Box(new Rect((Screen.width - w) / 2f, 10f * uiScale, w, h), scanNotification, notifStyle);
+                GUI.backgroundColor = Color.white;
+            }
+
             // Show results list
             if (!modEnabled.Value || displayTimer <= 0 || foundContainers.Count == 0)
                 return;
 
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
-            boxStyle.fontSize = 14;
+            boxStyle.fontSize = Mathf.RoundToInt(14 * uiScale);
             boxStyle.normal.textColor = Color.white;
             boxStyle.alignment = TextAnchor.UpperLeft;
             boxStyle.wordWrap = false;
             boxStyle.richText = true;
 
-            string text = $"<b>=== CONTAINERS ({foundContainers.Count}) ===</b>\n";
-            text += $"<color=yellow>{displayTimer:F0}s</color> | <color=cyan>G=Refresh</color>\n\n";
+            string displayKey = GetScanKeyDisplayName();
+            string text = $"<b> CONTAINERS ({foundContainers.Count}) </b>\n";
+            text += $"<color=yellow>{displayTimer:F0}s</color> | <color=cyan>{displayKey}=Refresh</color>\n\n";
 
             foreach (var container in foundContainers.Take(10))
             {
@@ -354,11 +424,11 @@ namespace ContainerFinder
 
             if (foundContainers.Count > 10)
             {
-                text += $"\n<color=gray>+{foundContainers.Count - 10} more</color>";
+                text += $"<color=white>+{foundContainers.Count - 10} more </color>\n";
             }
 
             GUI.backgroundColor = new Color(0, 0, 0, 0.85f);
-            GUI.Box(new Rect(10, 50, 280, 500), text, boxStyle);
+            GUI.Box(new Rect(10 * uiScale, 50 * uiScale, 280 * uiScale, 500 * uiScale), text, boxStyle);
             GUI.backgroundColor = Color.white;
         }
 
@@ -462,6 +532,7 @@ namespace ContainerFinder
             GUI.Box(new Rect(start.x, start.y, distance, width), GUIContent.none, lineStyle);
             GUI.matrix = matrix;
         }
+
 
         private class ContainerInfo
         {
