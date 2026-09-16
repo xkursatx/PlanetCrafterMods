@@ -1,7 +1,6 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HarmonyLib;
 using SpaceCraft;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,7 +10,7 @@ using UnityEngine.InputSystem;
 
 namespace ContainerFinder
 {
-    [BepInPlugin("xkursat.ContainerFinder", "Container Finder", "1.0.0")]
+    [BepInPlugin("xkursat.ContainerFinder", "Container Finder", "1.1.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         public static BepInExPlugin context;
@@ -34,6 +33,7 @@ namespace ContainerFinder
         private float scanNotificationTimer = 0f;
 
         private static InputAction scanAction;
+        private int lastScanFrame = -1;
 
         public static void Dbgl(string str = "", LogLevel logLevel = LogLevel.Debug)
         {
@@ -67,6 +67,37 @@ namespace ContainerFinder
             }
         }
 
+        private static string GetLegacyScanKey()
+        {
+            var binding = scanKey?.Value ?? "<Keyboard>/g";
+            var separator = binding.LastIndexOf('/');
+            if (separator >= 0)
+                binding = binding.Substring(separator + 1);
+
+            return binding.Trim('<', '>').ToLowerInvariant();
+        }
+
+        private static KeyCode GetScanKeyCode()
+        {
+            return System.Enum.TryParse(GetLegacyScanKey(), true, out KeyCode key)
+                ? key
+                : KeyCode.G;
+        }
+
+        private static bool IsLegacyScanKeyPressed()
+        {
+            try
+            {
+                return Input.GetKeyDown(GetLegacyScanKey());
+            }
+            catch
+            {
+                // Unity can disable the legacy input API when the game uses
+                // the new Input System exclusively.
+                return false;
+            }
+        }
+
         private void Awake()
         {
             context = this;
@@ -80,7 +111,7 @@ namespace ContainerFinder
             showPlayer = Config.Bind<bool>("Options", "ShowPlayer", true, "Show player-created containers");
 
             Logger.LogInfo("=".PadRight(80, '='));
-            Logger.LogInfo("ContainerFinder v1.0.0 Loaded!");
+            Logger.LogInfo("ContainerFinder v1.1.0 Loaded!");
             Logger.LogInfo($"Press {GetScanKeyDisplayName()} key to scan for containers.");
             Logger.LogInfo($"MaxDistance: {maxDistance.Value}m");
             Logger.LogInfo($"ShowGoldenOnly: {showGoldenOnly.Value}");
@@ -89,64 +120,58 @@ namespace ContainerFinder
             Logger.LogInfo($"ShowPlayer: {showPlayer.Value}");
             Logger.LogInfo("=".PadRight(80, '='));
 
-            // Apply Harmony patches - use Assembly not typeof!
-            try
-            {
-                var harmony = new Harmony("xkursat.ContainerFinder");
-                harmony.PatchAll();
-                Logger.LogInfo($"Harmony patches applied! Total patches: {harmony.GetPatchedMethods().Count()}");
-            }
-            catch (System.Exception ex)
-            {
-                Logger.LogError($"Failed to apply Harmony patches: {ex.Message}");
-                Logger.LogError($"Stack trace: {ex.StackTrace}");
-            }
+            Logger.LogInfo($"Using Unity input key: {GetLegacyScanKey()}");
 
-            // Initialize InputAction AFTER Harmony patches
             try
             {
                 scanAction = new InputAction(binding: scanKey.Value);
+                scanAction.performed += OnScanActionPerformed;
                 scanAction.Enable();
-                Logger.LogInfo($"InputAction created with binding: {scanKey.Value}");
-                Logger.LogInfo($"InputAction enabled: {scanAction.enabled}");
+                Logger.LogInfo($"Input System action enabled: {scanAction.enabled}");
             }
             catch (System.Exception ex)
             {
-                Logger.LogError($"Failed to create InputAction: {ex.Message}");
-                Logger.LogError($"Stack trace: {ex.StackTrace}");
+                Logger.LogWarning($"Input System action unavailable, using legacy input fallback: {ex.Message}");
             }
         }
 
-        [HarmonyPatch(typeof(PlayerInputDispatcher), "Update")]
-        public static class PlayerInputDispatcher_Update_Patch
+        private void OnScanActionPerformed(InputAction.CallbackContext _)
         {
-            private static int frameCounter = 0;
+            TriggerScan();
+        }
 
-            public static void Postfix()
+        private void TriggerScan()
+        {
+            // Both input paths can report the same physical key in one frame.
+            if (lastScanFrame == Time.frameCount)
+                return;
+
+            lastScanFrame = Time.frameCount;
+            Logger.LogInfo("=== SCAN KEY PRESSED! Starting container scan... ===");
+            ScanForContainers();
+        }
+
+        private void Update()
+        {
+            if (!modEnabled.Value)
+                return;
+
+            if (displayTimer > 0)
             {
-                if (!modEnabled.Value || context == null)
-                    return;
-
-                frameCounter++;
-
-                // Always update timer
-                if (context.displayTimer > 0)
+                displayTimer -= Time.deltaTime;
+                if (displayTimer <= 0)
                 {
-                    context.displayTimer -= Time.deltaTime;
-
-                    if (context.displayTimer <= 0)
-                    {
-                        context.isScanning = false;
-                    }
-                }
-
-                // Check for key press
-                if (scanAction != null && scanAction.WasPressedThisFrame())
-                {
-                    context.Logger.LogInfo("=== G KEY PRESSED! Starting container scan... ===");
-                    context.ScanForContainers();
+                    displayTimer = 0;
+                    isScanning = false;
                 }
             }
+
+            // Do not depend on PlayerInputDispatcher: its input path changed in
+            // newer game builds while the mod's OnGUI can still be displayed.
+            bool inputSystemPressed = scanAction != null && scanAction.WasPressedThisFrame();
+            bool legacyInputPressed = IsLegacyScanKeyPressed();
+            if (inputSystemPressed || legacyInputPressed)
+                TriggerScan();
         }
 
         private void ScanForContainers()
@@ -344,6 +369,15 @@ namespace ContainerFinder
             var activePlayerForGui = playersManagerForGui?.GetActivePlayerController();
             if (playersManagerForGui == null || activePlayerForGui == null)
                 return;
+
+            // Final fallback for game versions where the normal input update
+            // path is not visible to plugin-owned InputActions.
+            if (Event.current.type == EventType.KeyDown &&
+                Event.current.keyCode == GetScanKeyCode())
+            {
+                TriggerScan();
+                Event.current.Use();
+            }
 
             // UI scale multiplier from config
             float uiScale = 1f;
