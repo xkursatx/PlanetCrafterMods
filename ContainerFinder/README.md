@@ -10,7 +10,7 @@ Thank you for your support and feedback!
 
 # Container Finder
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/xkursatx/PlanetCrafterMods)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/xkursatx/PlanetCrafterMods)
 [![Game](https://img.shields.io/badge/game-The%20Planet%20Crafter-green.svg)](https://store.steampowered.com/app/1284190/The_Planet_Crafter/)
 
 Locate all containers on the planet with 3D markers and distance indicators.
@@ -59,10 +59,12 @@ Edit `BepInEx/config/xkursat.ContainerFinder.cfg`:
 ```ini
 [Hotkeys]
 ScanKey = <Keyboard>/g       # Change scan key
+GamepadScanKey = <Gamepad>/buttonNorth  # Xbox Y / PlayStation Triangle
 
 [Options]
 MaxDistance = 5000.0         # Scan radius (5000m = entire planet)
 ShowGoldenOnly = false       # Filter to golden containers only
+DisplayDuration = 30.0       # How long scan results remain visible (seconds)
 ```
 
 ## Supported Containers

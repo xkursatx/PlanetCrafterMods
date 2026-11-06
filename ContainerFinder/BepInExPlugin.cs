@@ -10,7 +10,7 @@ using UnityEngine.InputSystem;
 
 namespace ContainerFinder
 {
-    [BepInPlugin("xkursat.ContainerFinder", "Container Finder", "1.1.0")]
+    [BepInPlugin("xkursat.ContainerFinder", "Container Finder", "1.1.1")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         public static BepInExPlugin context;
@@ -19,14 +19,15 @@ namespace ContainerFinder
         public static ConfigEntry<bool> isDebug;
         public static ConfigEntry<float> uiScalePercent;
         public static ConfigEntry<string> scanKey;
+        public static ConfigEntry<string> gamepadScanKey;
         public static ConfigEntry<float> maxDistance;
         public static ConfigEntry<bool> showGoldenOnly;
         public static ConfigEntry<bool> showEmpty;
         public static ConfigEntry<bool> showPlayer;
+        public static ConfigEntry<float> displayDuration;
 
         private List<ContainerInfo> foundContainers = new List<ContainerInfo>();
         private float displayTimer = 0f;
-        private const float DISPLAY_DURATION = 30f;
         private bool isScanning = false;
         private bool show3DMarkers = true; // NEW: Toggle for 3D markers
         private string scanNotification = "";
@@ -41,11 +42,11 @@ namespace ContainerFinder
                 context.Logger.Log(logLevel, str);
         }
 
-        private static string GetScanKeyDisplayName()
+        private static string GetBindingDisplayName(string binding, string fallback)
         {
             try
             {
-                var binding = scanKey?.Value ?? "<Keyboard>/g";
+                binding = string.IsNullOrWhiteSpace(binding) ? fallback : binding;
                 // If binding contains '/', take last segment
                 if (binding.Contains('/'))
                     binding = binding.Substring(binding.LastIndexOf('/') + 1);
@@ -63,8 +64,15 @@ namespace ContainerFinder
             }
             catch
             {
-                return "G";
+                return fallback;
             }
+        }
+
+        private static string GetScanKeyDisplayName()
+        {
+            var keyboard = GetBindingDisplayName(scanKey?.Value, "<Keyboard>/g");
+            var gamepad = GetBindingDisplayName(gamepadScanKey?.Value, "");
+            return string.IsNullOrWhiteSpace(gamepad) ? keyboard : $"{keyboard} / {gamepad}";
         }
 
         private static string GetLegacyScanKey()
@@ -105,26 +113,32 @@ namespace ContainerFinder
             isDebug = Config.Bind<bool>("General", "IsDebug", true, "Enable debug logs");
             uiScalePercent = Config.Bind<float>("General", "UiScalePercent", 100f, "UI scale percent for On-Screen displays (e.g. 100 = normal, 150 = 1.5x)");
             scanKey = Config.Bind<string>("Hotkeys", "ScanKey", "<Keyboard>/g", "Key to scan for containers");
+            gamepadScanKey = Config.Bind<string>("Hotkeys", "GamepadScanKey", "<Gamepad>/buttonNorth", "Gamepad button to scan for containers");
             maxDistance = Config.Bind<float>("Options", "MaxDistance", 5000f, "Maximum scan distance (meters)");
             showGoldenOnly = Config.Bind<bool>("Options", "ShowGoldenOnly", false, "Show only Golden Containers");
             showEmpty = Config.Bind<bool>("Options", "ShowEmpty", false, "Show empty containers");
             showPlayer = Config.Bind<bool>("Options", "ShowPlayer", true, "Show player-created containers");
+            displayDuration = Config.Bind<float>("Options", "DisplayDuration", 30f, "How long scan results remain visible (seconds)");
 
             Logger.LogInfo("=".PadRight(80, '='));
-            Logger.LogInfo("ContainerFinder v1.1.0 Loaded!");
+            Logger.LogInfo("ContainerFinder v1.1.1 Loaded!");
             Logger.LogInfo($"Press {GetScanKeyDisplayName()} key to scan for containers.");
             Logger.LogInfo($"MaxDistance: {maxDistance.Value}m");
             Logger.LogInfo($"ShowGoldenOnly: {showGoldenOnly.Value}");
             Logger.LogInfo($"ModEnabled: {modEnabled.Value}");
             Logger.LogInfo($"ShowEmpty: {showEmpty.Value}");
             Logger.LogInfo($"ShowPlayer: {showPlayer.Value}");
+            Logger.LogInfo($"DisplayDuration: {displayDuration.Value}s");
             Logger.LogInfo("=".PadRight(80, '='));
 
             Logger.LogInfo($"Using Unity input key: {GetLegacyScanKey()}");
 
             try
             {
-                scanAction = new InputAction(binding: scanKey.Value);
+                scanAction = new InputAction();
+                scanAction.AddBinding(scanKey.Value);
+                if (!string.IsNullOrWhiteSpace(gamepadScanKey.Value))
+                    scanAction.AddBinding(gamepadScanKey.Value);
                 scanAction.performed += OnScanActionPerformed;
                 scanAction.Enable();
                 Logger.LogInfo($"Input System action enabled: {scanAction.enabled}");
@@ -267,7 +281,7 @@ namespace ContainerFinder
                 }
             }
 
-            displayTimer = DISPLAY_DURATION;
+            displayTimer = Mathf.Max(0f, displayDuration.Value);
             isScanning = false;
 
             // Notify player with HUD message and optional sound
